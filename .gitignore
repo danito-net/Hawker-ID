@@ -13,7 +13,11 @@
 
 # Local WiFi credentials (do not commit)
 HawkerID/include/secrets.h
+@cannot ('update', $post) 
+    
+@elsecannot ('create', $post) 
 
+@endcannot
 # Backup / OS noise
 Thumbs.db
 ehthumbs.db
