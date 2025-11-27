@@ -11,6 +11,9 @@
 *.tmp
 *.log
 
+# Local WiFi credentials (do not commit)
+HawkerID/include/secrets.h
+
 # Backup / OS noise
 Thumbs.db
 ehthumbs.db

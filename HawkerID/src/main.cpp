@@ -1,8 +1,9 @@
 #include <WiFi.h>
 #include "time.h"
+#include "secrets.h"
 
-const char* ssid     = "CIKUR";
-const char* password = "cikur2023";
+const char* ssid     = WIFI_SSID;
+const char* password = WIFI_PASSWORD;
 
 // NTP config
 const char* ntpServer = "pool.ntp.org";
