@@ -23,13 +23,13 @@ String currentTimestamp() {
 
 void setup() {
   Serial.begin(115200);
-  delay(2000);
+  delay(1000);
 
   Serial.println();
   Serial.println("Booting ESP32-S3 mic loudness demo");
 
   WiFi.begin(ssid, password);
-  Serial.print("Connecting to WiFi");
+  Serial.print("Connecting to WiFi ");
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
@@ -49,7 +49,6 @@ void setup() {
   Serial.print("Time synced: ");
   Serial.println(currentTimestamp());
 }
-
 
 void loop() {
 }
