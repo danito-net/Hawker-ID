@@ -2,6 +2,7 @@
 #include "time.h"
 #include "secrets.h"
 #include "driver/i2s.h"
+#include "esp_camera.h"
 
 #define MIC_I2S_PORT       I2S_NUM_0
 #define MIC_SAMPLE_RATE    16000
@@ -14,6 +15,26 @@
 
 bool micReady = false;
 
+// Camera pins for DFRobot ESP32-S3 AI CAM (OV3660)
+#define PWDN_GPIO_NUM  -1
+#define RESET_GPIO_NUM -1
+#define XCLK_GPIO_NUM  5
+#define Y9_GPIO_NUM    4
+#define Y8_GPIO_NUM    6
+#define Y7_GPIO_NUM    7
+#define Y6_GPIO_NUM    14
+#define Y5_GPIO_NUM    17
+#define Y4_GPIO_NUM    21
+#define Y3_GPIO_NUM    18
+#define Y2_GPIO_NUM    16
+#define VSYNC_GPIO_NUM 1
+#define HREF_GPIO_NUM  2
+#define PCLK_GPIO_NUM  15
+#define SIOD_GPIO_NUM  8
+#define SIOC_GPIO_NUM  9
+
+bool cameraReady = false;
+
 const char* ssid     = WIFI_SSID;
 const char* password = WIFI_PASSWORD;
 
@@ -22,6 +43,16 @@ const char* ntpServer = "pool.ntp.org";
 // GMT+7 = 7 * 3600 = 25200 seconds
 const long  gmtOffset_sec = 7 * 3600;
 const int   daylightOffset_sec = 0;  // no DST in WIB
+
+String currentTimestamp() {
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    return "1970-01-01 00:00:00";
+  }
+  char buf[25];
+  strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &timeinfo);
+  return String(buf);
+}
 
 void micInit() {
   i2s_config_t i2s_config = {
@@ -40,13 +71,14 @@ void micInit() {
 
   i2s_pin_config_t pin_config = {
     .bck_io_num = I2S_PIN_NO_CHANGE, // not used for PDM mic
-    .ws_io_num = MIC_PIN_CLK,        // 38
+    .ws_io_num = MIC_PIN_CLK,        // PDM clock (DFRobot example maps CLOCK_PIN -> ws_io_num)
     .data_out_num = I2S_PIN_NO_CHANGE,
-    .data_in_num = MIC_PIN_DATA      // 39
+    .data_in_num = MIC_PIN_DATA      // PDM data
   };
 
   esp_err_t err = i2s_driver_install(MIC_I2S_PORT, &i2s_config, 0, NULL);
   if (err != ESP_OK) {
+    micReady = false;
     Serial.print("i2s_driver_install failed, err=");
     Serial.println(err);
     return;
@@ -70,14 +102,81 @@ float computeRmsLoudness(int16_t *samples, size_t count) {
 int16_t micBuffer[MIC_BUFFER_SAMPLES];
 const float LOUDNESS_THRESHOLD = 3000.0f;  // I will tune this later 
 
-String currentTimestamp() {
-  struct tm timeinfo;
-  if (!getLocalTime(&timeinfo)) {
-    return "1970-01-01 00:00:00";
+bool initCamera() {
+
+  camera_config_t config;
+  config.ledc_channel = LEDC_CHANNEL_0;
+  config.ledc_timer   = LEDC_TIMER_0;
+  config.pin_d0       = Y2_GPIO_NUM;
+  config.pin_d1       = Y3_GPIO_NUM;
+  config.pin_d2       = Y4_GPIO_NUM;
+  config.pin_d3       = Y5_GPIO_NUM;
+  config.pin_d4       = Y6_GPIO_NUM;
+  config.pin_d5       = Y7_GPIO_NUM;
+  config.pin_d6       = Y8_GPIO_NUM;
+  config.pin_d7       = Y9_GPIO_NUM;
+  config.pin_xclk     = XCLK_GPIO_NUM;
+  config.pin_pclk     = PCLK_GPIO_NUM;
+  config.pin_vsync    = VSYNC_GPIO_NUM;
+  config.pin_href     = HREF_GPIO_NUM;
+  config.pin_sccb_sda = SIOD_GPIO_NUM;
+  config.pin_sccb_scl = SIOC_GPIO_NUM;
+  config.pin_pwdn     = PWDN_GPIO_NUM;
+  config.pin_reset    = RESET_GPIO_NUM;
+  config.xclk_freq_hz = 20000000;
+  config.pixel_format = PIXFORMAT_JPEG;
+
+  config.frame_size   = FRAMESIZE_VGA;
+  // config.fb_location  = CAMERA_FB_IN_PSRAM;
+  config.fb_location = CAMERA_FB_IN_DRAM;
+
+  config.jpeg_quality = 15;
+  config.fb_count     = 1;
+
+  config.grab_mode    = CAMERA_GRAB_LATEST;
+
+  esp_err_t err = esp_camera_init(&config);
+  Serial.print("esp_camera_init err=0x");
+  Serial.println(err, HEX);
+  if (err != ESP_OK) {
+    Serial.println("Camera init failed.");
+    cameraReady = false;
+    return false;
   }
-  char buf[25];
-  strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &timeinfo);
-  return String(buf);
+
+  sensor_t *s = esp_camera_sensor_get();
+  if (s && s->id.PID == OV3660_PID) {
+    s->set_vflip(s, 1);
+    s->set_brightness(s, 1);
+    s->set_saturation(s, -2);
+  }
+
+  cameraReady = true;
+  Serial.println("Camera initialized.");
+  return true;
+  }
+
+  void captureOneFrame() {
+  if (!cameraReady) {
+    Serial.println("Camera not ready, cannot capture.");
+    return;
+  }
+
+  camera_fb_t *fb = esp_camera_fb_get();
+  if (!fb) {
+    Serial.println("Failed to obtain image frame.");
+    return;
+  }
+
+  String ts = currentTimestamp();
+  Serial.print(ts);
+  Serial.print(" Captured frame, size=");
+  Serial.print(fb->len);
+  Serial.println(" bytes");
+
+  // For this milestone we just log and release the frame
+  esp_camera_fb_return(fb);
+
 }
 
 void setup() {
@@ -102,7 +201,7 @@ void setup() {
   Serial.println(WiFi.localIP());
 
   configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
-  Serial.println("Waiting for time sync...");
+  Serial.println("Waiting for time sync ...");
   
   struct tm timeinfo;
   
@@ -118,9 +217,18 @@ void setup() {
   micInit();
   if (!micReady) {
      Serial.println("Microphone init failed, stopping.");
-     // TODO: while (true) delay(1000);
+   } else {
+     delay(1000);
+     Serial.println("Microphone initialized.");
   }
-  Serial.println("Microphone initialized.");
+
+  Serial.println("Start initializing camera ...");
+  if (!initCamera()) {
+    Serial.println("Camera initialization failed, will not capture!");
+  } else {
+    Serial.println("Camera is ready ...");
+  }
+
 }
 
 void loop() {
@@ -147,23 +255,29 @@ void loop() {
   size_t samplesRead = bytesRead / sizeof(int16_t);
 
   // Debug: show first few samples
-  Serial.print(currentTimestamp());
-  Serial.print(" first samples: ");
-  for (int i = 0; i < 8 && i < samplesRead; i++) {
-    Serial.print(micBuffer[i]);
-    Serial.print(" ");
-  }
-  Serial.println();
+  // Serial.print(currentTimestamp());
+  // Serial.print(" first samples: ");
+  // for (int i = 0; i < 8 && i < samplesRead; i++) {
+  //   Serial.print(micBuffer[i]);
+  //   Serial.print(" ");
+  // }
+  // Serial.println();
 
   float rms = computeRmsLoudness(micBuffer, samplesRead);
 
     // Log every buffer with timestamp and RMS
-  String ts = currentTimestamp();
-  Serial.print(ts);
-  Serial.print(" RMS=");
-  Serial.println(rms);
+  // String ts = currentTimestamp();
+  // Serial.print(ts);
+  // Serial.print(" RMS=");
+  // Serial.println(rms);
 
-  // TODO: if (rms > LOUDNESS_THRESHOLD) {capture photo}
+  if (rms > LOUDNESS_THRESHOLD) {
+    Serial.print(currentTimestamp());
+    Serial.print(" Loud sound detected, RMS=");
+    Serial.println(rms);
+
+    captureOneFrame();
+  }
 
 }
 
