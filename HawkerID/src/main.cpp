@@ -5,9 +5,15 @@
 #include "FS.h"
 #include "SD.h"
 #include <WiFiClientSecure.h>
+#include <DFRobot_LTR308.h>
 
 #include "secrets.h"
 #include "telegram_secrets.h"
+
+const int IR_LED_PIN = 47;
+const float IR_ON_LUX  = 10.0;  // below this, turn IR on
+const float IR_OFF_LUX = 20.0;  // above this, turn IR off
+bool irOn = false;
 
 // SDCard's chip select pin for DFRobot ESP32-S3 AI CAM
 #define SD_CARD_CS 10
@@ -52,6 +58,8 @@ const long  gmtOffset_sec = 7 * 3600;
 const int   daylightOffset_sec = 0;  // no DST in WIB
 
 RTC_DATA_ATTR int photo_count = 0;
+
+DFRobot_LTR308 light;
 
 WiFiClientSecure tgClient;
 const char* TELEGRAM_HOST = "api.telegram.org";
@@ -180,6 +188,48 @@ bool initCamera() {
   
 }
 
+bool sendPhotoToTelegram(camera_fb_t *fb) {
+  if (!tgClient.connect(TELEGRAM_HOST, 443)) {
+    Serial.println("Telegram: connection failed");
+    return false;
+  }
+
+  String head = "--Xboundary\r\n"
+                "Content-Disposition: form-data; name=\"chat_id\"\r\n\r\n" +
+                String(TELEGRAM_CHAT_ID) +
+                "\r\n--Xboundary\r\n"
+                "Content-Disposition: form-data; name=\"photo\"; filename=\"clap.jpg\"\r\n"
+                "Content-Type: image/jpeg\r\n\r\n";
+
+  String tail = "\r\n--Xboundary--\r\n";
+
+  uint32_t imageLen = fb->len;
+  uint32_t totalLen = head.length() + imageLen + tail.length();
+
+  tgClient.println("POST /bot" + String(TELEGRAM_BOT_TOKEN) + "/sendPhoto HTTP/1.1");
+  tgClient.println("Host: " + String(TELEGRAM_HOST));
+  tgClient.println("Content-Type: multipart/form-data; boundary=Xboundary");
+  tgClient.println("Content-Length: " + String(totalLen));
+  tgClient.println();
+  tgClient.print(head);
+
+  // send image buffer
+  tgClient.write(fb->buf, fb->len);
+
+  tgClient.print(tail);
+
+  // optional: read minimal response
+  while (tgClient.connected()) {
+    String line = tgClient.readStringUntil('\n');
+    if (line == "\r") break;
+  }
+  String body = tgClient.readString();
+  Serial.println("Telegram response: " + body);
+
+  tgClient.stop();
+  return true;
+}
+
 void captureOneFrame() {
 
   if (!cameraReady) {
@@ -224,48 +274,6 @@ void captureOneFrame() {
   }
   
   esp_camera_fb_return(fb);
-}
-
-bool sendPhotoToTelegram(camera_fb_t *fb) {
-  if (!tgClient.connect(TELEGRAM_HOST, 443)) {
-    Serial.println("Telegram: connection failed");
-    return false;
-  }
-
-  String head = "--Xboundary\r\n"
-                "Content-Disposition: form-data; name=\"chat_id\"\r\n\r\n" +
-                String(TELEGRAM_CHAT_ID) +
-                "\r\n--Xboundary\r\n"
-                "Content-Disposition: form-data; name=\"photo\"; filename=\"clap.jpg\"\r\n"
-                "Content-Type: image/jpeg\r\n\r\n";
-
-  String tail = "\r\n--Xboundary--\r\n";
-
-  uint32_t imageLen = fb->len;
-  uint32_t totalLen = head.length() + imageLen + tail.length();
-
-  tgClient.println("POST /bot" + String(TELEGRAM_BOT_TOKEN) + "/sendPhoto HTTP/1.1");
-  tgClient.println("Host: " + String(TELEGRAM_HOST));
-  tgClient.println("Content-Type: multipart/form-data; boundary=Xboundary");
-  tgClient.println("Content-Length: " + String(totalLen));
-  tgClient.println();
-  tgClient.print(head);
-
-  // send image buffer
-  tgClient.write(fb->buf, fb->len);
-
-  tgClient.print(tail);
-
-  // optional: read minimal response
-  while (tgClient.connected()) {
-    String line = tgClient.readStringUntil('\n');
-    if (line == "\r") break;
-  }
-  String body = tgClient.readString();
-  Serial.println("Telegram response: " + body);
-
-  tgClient.stop();
-  return true;
 }
 
 bool initSDCard() {
@@ -320,6 +328,18 @@ void setup() {
   Serial.print("Time synced: ");
   Serial.println(currentTimestamp());
   
+  Serial.println("Initializing light sensor...");
+  while (!light.begin()) {
+    Serial.println("LTR308 init failed, retrying...");
+    delay(1000);
+  }
+  Serial.println("LTR308 init OK.");
+
+  // IR LED pin
+  const int IR_LED_PIN = 47;
+  pinMode(IR_LED_PIN, OUTPUT);
+  digitalWrite(IR_LED_PIN, LOW);  // start with IR off
+
   tgClient.setInsecure(); // or load root cert properly later
   Serial.println("Telegram client ready.");
 
@@ -352,6 +372,32 @@ void setup() {
 
 void loop() {
   
+  static unsigned long lastLightCheck = 0;
+  unsigned long now = millis();
+  
+  if (now - lastLightCheck > 500) {  // check every 500 ms
+    
+    lastLightCheck = now;
+
+    uint32_t raw = light.getData();
+    float lux = light.getLux(raw);
+
+    // Simple hysteresis
+    if (!irOn && lux < IR_ON_LUX) {
+      irOn = true;
+      digitalWrite(IR_LED_PIN, HIGH);
+      Serial.print(currentTimestamp());
+      Serial.print(" IR ON, lux=");
+      Serial.println(lux);
+    } else if (irOn && lux > IR_OFF_LUX) {
+      irOn = false;
+      digitalWrite(IR_LED_PIN, LOW);
+      Serial.print(currentTimestamp());
+      Serial.print(" IR OFF, lux=");
+      Serial.println(lux);
+    }
+  }
+
   if (!micReady) {
     delay(1000);
     return;
