@@ -3,6 +3,11 @@
 #include "secrets.h"
 #include "driver/i2s.h"
 #include "esp_camera.h"
+#include "FS.h"
+#include "SD.h"
+
+#define SD_CARD_CS 10   // from DFRobot example
+RTC_DATA_ATTR int photo_count = 0;  // optional counter
 
 #define MIC_I2S_PORT       I2S_NUM_0
 #define MIC_SAMPLE_RATE    16000
@@ -156,7 +161,7 @@ bool initCamera() {
   return true;
   }
 
-  void captureOneFrame() {
+void captureOneFrame() {
   if (!cameraReady) {
     Serial.println("Camera not ready, cannot capture.");
     return;
@@ -168,15 +173,46 @@ bool initCamera() {
     return;
   }
 
-  String ts = currentTimestamp();
-  Serial.print(ts);
-  Serial.print(" Captured frame, size=");
-  Serial.print(fb->len);
-  Serial.println(" bytes");
+  // Build filename: YYYYMMDD-HHMMSS-N.jpg
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    Serial.println("Failed to get time for filename.");
+    esp_camera_fb_return(fb);
+    return;
+  }
 
-  // For this milestone we just log and release the frame
+  char timeStr[32];
+  strftime(timeStr, sizeof(timeStr), "%Y%m%d-%H%M%S", &timeinfo);
+  String path = "/" + String(timeStr) + "-" + String(photo_count) + ".jpg";
+
+  File file = SD.open(path.c_str(), FILE_WRITE);
+  if (!file) {
+    Serial.println("Failed to open file on SD");
+  } else {
+    file.write(fb->buf, fb->len);
+    file.close();
+    Serial.print("Saved photo to ");
+    Serial.println(path);
+    photo_count++;
+  }
+
   esp_camera_fb_return(fb);
+}
 
+bool initSDCard() {
+  if (!SD.begin(SD_CARD_CS)) {
+    Serial.println("SD card init failed.");
+    return false;
+  }
+
+  uint8_t cardType = SD.cardType();
+  if (cardType == CARD_NONE) {
+    Serial.println("No SD card detected.");
+    return false;
+  }
+
+  Serial.println("SD card initialized.");
+  return true;
 }
 
 void setup() {
@@ -227,6 +263,13 @@ void setup() {
     Serial.println("Camera initialization failed, will not capture!");
   } else {
     Serial.println("Camera is ready ...");
+  }
+
+  Serial.println("Initializing SD card...");
+  if (!initSDCard()) {
+    Serial.println("SD init failed, photos will not be saved.");
+  } else {
+    Serial.println("SD card ready.");
   }
 
 }
