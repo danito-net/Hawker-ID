@@ -327,21 +327,20 @@ void setup() {
   Serial.println();
   Serial.print("Time synced: ");
   Serial.println(currentTimestamp());
+  Serial.println("Start initializing camera ...");
   
+  if (!initCamera()) {
+    Serial.println("Camera initialization failed, will not capture!");
+  } else {
+    Serial.println("Camera is ready ...");
+  }
+
   Serial.println("Initializing light sensor...");
   while (!light.begin()) {
     Serial.println("LTR308 init failed, retrying...");
     delay(1000);
   }
   Serial.println("LTR308 init OK.");
-
-  // IR LED pin
-  const int IR_LED_PIN = 47;
-  pinMode(IR_LED_PIN, OUTPUT);
-  digitalWrite(IR_LED_PIN, LOW);  // start with IR off
-
-  tgClient.setInsecure(); // or load root cert properly later
-  Serial.println("Telegram client ready.");
 
   micInit();
 
@@ -352,14 +351,6 @@ void setup() {
      Serial.println("Microphone initialized.");
   }
 
-  Serial.println("Start initializing camera ...");
-  
-  if (!initCamera()) {
-    Serial.println("Camera initialization failed, will not capture!");
-  } else {
-    Serial.println("Camera is ready ...");
-  }
-
   Serial.println("Initializing SD card...");
   
   if (!initSDCard()) {
@@ -367,6 +358,14 @@ void setup() {
   } else {
     Serial.println("SD card ready.");
   }
+
+  tgClient.setInsecure(); // or load root cert properly later
+  Serial.println("Telegram client ready.");
+
+    // IR LED pin
+  const int IR_LED_PIN = 47;
+  pinMode(IR_LED_PIN, OUTPUT);
+  digitalWrite(IR_LED_PIN, LOW);  // start with IR off
 
 }
 
@@ -382,19 +381,26 @@ void loop() {
     uint32_t raw = light.getData();
     float lux = light.getLux(raw);
 
+
+    // Serial.print(currentTimestamp());
+    // Serial.print(" raw=");
+    // Serial.print(raw);
+    // Serial.print(" lux=");
+    // Serial.println(lux);
+
     // Simple hysteresis
     if (!irOn && lux < IR_ON_LUX) {
       irOn = true;
       digitalWrite(IR_LED_PIN, HIGH);
-      Serial.print(currentTimestamp());
-      Serial.print(" IR ON, lux=");
-      Serial.println(lux);
+      // Serial.print(currentTimestamp());
+      // Serial.print(" IR ON, lux=");
+      // Serial.println(lux);
     } else if (irOn && lux > IR_OFF_LUX) {
       irOn = false;
       digitalWrite(IR_LED_PIN, LOW);
-      Serial.print(currentTimestamp());
-      Serial.print(" IR OFF, lux=");
-      Serial.println(lux);
+      // Serial.print(currentTimestamp());
+      // Serial.print(" IR OFF, lux=");
+      // Serial.println(lux);
     }
   }
 
