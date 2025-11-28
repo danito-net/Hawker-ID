@@ -13,6 +13,7 @@
 
 # Local WiFi credentials (do not commit)
 HawkerID/include/secrets.h
+HawkerID/include/telegram_secrets.h
 @cannot ('update', $post) 
     
 @elsecannot ('create', $post) 

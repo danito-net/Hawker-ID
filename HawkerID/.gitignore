@@ -6,3 +6,4 @@
 
 # Local WiFi credentials (do not commit)
 include/secrets.h
+include/telegram_secrets.h

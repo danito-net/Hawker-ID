@@ -1,10 +1,12 @@
 #include <WiFi.h>
 #include "time.h"
-#include "secrets.h"
 #include "driver/i2s.h"
 #include "esp_camera.h"
 #include "FS.h"
 #include "SD.h"
+
+#include "secrets.h"
+#include "telegram_secrets.h"
 
 // SDCard's chip select pin for DFRobot ESP32-S3 AI CAM
 #define SD_CARD_CS 10
