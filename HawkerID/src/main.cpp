@@ -6,19 +6,16 @@
 #include "FS.h"
 #include "SD.h"
 
-#define SD_CARD_CS 10   // from DFRobot example
-RTC_DATA_ATTR int photo_count = 0;  // optional counter
+// SDCard's chip select pin for DFRobot ESP32-S3 AI CAM
+#define SD_CARD_CS 10
 
+// PDM mic pins for DFRobot ESP32-S3 AI CAM
+#define MIC_PIN_CLK  38   // CLOCK_PIN
+#define MIC_PIN_DATA 39   // DATA_PIN
 #define MIC_I2S_PORT       I2S_NUM_0
 #define MIC_SAMPLE_RATE    16000
 #define MIC_SAMPLE_BITS    I2S_BITS_PER_SAMPLE_16BIT
 #define MIC_BUFFER_SAMPLES 512
-
-// PDM mic pins (DFRobot)
-#define MIC_PIN_CLK  38   // CLOCK_PIN
-#define MIC_PIN_DATA 39   // DATA_PIN
-
-bool micReady = false;
 
 // Camera pins for DFRobot ESP32-S3 AI CAM (OV3660)
 #define PWDN_GPIO_NUM  -1
@@ -38,6 +35,7 @@ bool micReady = false;
 #define SIOD_GPIO_NUM  8
 #define SIOC_GPIO_NUM  9
 
+bool micReady = false;
 bool cameraReady = false;
 
 const char* ssid     = WIFI_SSID;
@@ -45,21 +43,29 @@ const char* password = WIFI_PASSWORD;
 
 // NTP config
 const char* ntpServer = "pool.ntp.org";
+// I live in West Java, Indonesia; so my TimeZone is WIB (GMT+7)
 // GMT+7 = 7 * 3600 = 25200 seconds
 const long  gmtOffset_sec = 7 * 3600;
 const int   daylightOffset_sec = 0;  // no DST in WIB
 
+RTC_DATA_ATTR int photo_count = 0;
+
 String currentTimestamp() {
+
   struct tm timeinfo;
+
   if (!getLocalTime(&timeinfo)) {
     return "1970-01-01 00:00:00";
   }
+
   char buf[25];
   strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &timeinfo);
   return String(buf);
+
 }
 
 void micInit() {
+
   i2s_config_t i2s_config = {
     .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX | I2S_MODE_PDM), // RX + PDM
     .sample_rate = MIC_SAMPLE_RATE,
@@ -82,16 +88,19 @@ void micInit() {
   };
 
   esp_err_t err = i2s_driver_install(MIC_I2S_PORT, &i2s_config, 0, NULL);
+
   if (err != ESP_OK) {
     micReady = false;
     Serial.print("i2s_driver_install failed, err=");
     Serial.println(err);
     return;
   }
+
   i2s_set_pin(MIC_I2S_PORT, &pin_config);
   i2s_zero_dma_buffer(MIC_I2S_PORT);
   micReady = true;
   Serial.println("I2S PDM mic initialized.");
+
 }
 
 float computeRmsLoudness(int16_t *samples, size_t count) {
@@ -130,12 +139,13 @@ bool initCamera() {
   config.pin_reset    = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
-
   config.frame_size   = FRAMESIZE_VGA;
+  
   // config.fb_location  = CAMERA_FB_IN_PSRAM;
   config.fb_location = CAMERA_FB_IN_DRAM;
 
-  config.jpeg_quality = 15;
+  config.jpeg_quality = 15; // 1–63, lower is better quality
+
   config.fb_count     = 1;
 
   config.grab_mode    = CAMERA_GRAB_LATEST;
@@ -143,6 +153,7 @@ bool initCamera() {
   esp_err_t err = esp_camera_init(&config);
   Serial.print("esp_camera_init err=0x");
   Serial.println(err, HEX);
+
   if (err != ESP_OK) {
     Serial.println("Camera init failed.");
     cameraReady = false;
@@ -150,6 +161,7 @@ bool initCamera() {
   }
 
   sensor_t *s = esp_camera_sensor_get();
+  
   if (s && s->id.PID == OV3660_PID) {
     s->set_vflip(s, 1);
     s->set_brightness(s, 1);
@@ -159,9 +171,11 @@ bool initCamera() {
   cameraReady = true;
   Serial.println("Camera initialized.");
   return true;
-  }
+  
+}
 
 void captureOneFrame() {
+
   if (!cameraReady) {
     Serial.println("Camera not ready, cannot capture.");
     return;
@@ -173,7 +187,6 @@ void captureOneFrame() {
     return;
   }
 
-  // Build filename: YYYYMMDD-HHMMSS-N.jpg
   struct tm timeinfo;
   if (!getLocalTime(&timeinfo)) {
     Serial.println("Failed to get time for filename.");
@@ -181,11 +194,13 @@ void captureOneFrame() {
     return;
   }
 
+  // Filename format: YYYYMMDD-HHMMSS-N.jpg
   char timeStr[32];
   strftime(timeStr, sizeof(timeStr), "%Y%m%d-%H%M%S", &timeinfo);
   String path = "/" + String(timeStr) + "-" + String(photo_count) + ".jpg";
 
   File file = SD.open(path.c_str(), FILE_WRITE);
+
   if (!file) {
     Serial.println("Failed to open file on SD");
   } else {
@@ -200,6 +215,7 @@ void captureOneFrame() {
 }
 
 bool initSDCard() {
+
   if (!SD.begin(SD_CARD_CS)) {
     Serial.println("SD card init failed.");
     return false;
@@ -221,7 +237,7 @@ void setup() {
   delay(1000);
 
   Serial.println();
-  Serial.println("Booting ESP32-S3 mic loudness demo");
+  Serial.println("Starting HAWKER-ID ...");
 
   WiFi.begin(ssid, password);
   
@@ -251,6 +267,7 @@ void setup() {
   Serial.println(currentTimestamp());
   
   micInit();
+
   if (!micReady) {
      Serial.println("Microphone init failed, stopping.");
    } else {
@@ -259,6 +276,7 @@ void setup() {
   }
 
   Serial.println("Start initializing camera ...");
+  
   if (!initCamera()) {
     Serial.println("Camera initialization failed, will not capture!");
   } else {
@@ -266,6 +284,7 @@ void setup() {
   }
 
   Serial.println("Initializing SD card...");
+  
   if (!initSDCard()) {
     Serial.println("SD init failed, photos will not be saved.");
   } else {
@@ -298,6 +317,7 @@ void loop() {
   size_t samplesRead = bytesRead / sizeof(int16_t);
 
   // Debug: show first few samples
+  
   // Serial.print(currentTimestamp());
   // Serial.print(" first samples: ");
   // for (int i = 0; i < 8 && i < samplesRead; i++) {
@@ -308,7 +328,8 @@ void loop() {
 
   float rms = computeRmsLoudness(micBuffer, samplesRead);
 
-    // Log every buffer with timestamp and RMS
+  // Log every buffer with timestamp and RMS
+  
   // String ts = currentTimestamp();
   // Serial.print(ts);
   // Serial.print(" RMS=");
@@ -323,4 +344,3 @@ void loop() {
   }
 
 }
-
