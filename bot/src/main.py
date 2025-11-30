@@ -6,6 +6,9 @@ from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTyp
 from dotenv import load_dotenv
 from datetime import datetime, timezone
 
+from fastapi import FastAPI, UploadFile, File
+import shutil
+
 load_dotenv()
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
@@ -25,6 +28,24 @@ def get_save_dir():
     # Create if not exist
     os.makedirs(dir_path, exist_ok=True)
     return dir_path
+
+app = FastAPI()
+
+@app.post("/sendphoto")
+async def send_photo_endpoint(chat_id: int, ambient_light: str, file: UploadFile = File(...)):
+    save_dir = get_save_dir()
+    filename = file.filename
+    filepath = os.path.join(save_dir, filename)
+    with open(filepath, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    # Save ambient light info in .txt
+    txtpath = filepath.rsplit('.', 1)[0] + ".txt"
+    with open(txtpath, "w") as f:
+        f.write(f"Ambient light: {ambient_light}\n")
+
+    await send_photo_update(context=your_application_context, chat_id=chat_id, photo_path=filepath, caption=ambient_light)
+    return {"status": "photo sent"}
 
 async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.photo:
