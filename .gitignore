@@ -11,6 +11,9 @@
 *.tmp
 *.log
 
+# Environment / configuration file
+bot/.env
+
 # Local WiFi credentials (do not commit)
 HawkerID/include/secrets.h
 HawkerID/include/telegram_secrets.h
