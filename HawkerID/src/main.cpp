@@ -4,9 +4,9 @@
 #include "esp_camera.h"
 #include "FS.h"
 #include "SD.h"
+#include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 #include <DFRobot_LTR308.h>
-
 #include "secrets.h"
 #include "telegram_secrets.h"
 
@@ -58,6 +58,8 @@ const long  gmtOffset_sec = 7 * 3600;
 const int   daylightOffset_sec = 0;  // no DST in WIB
 
 RTC_DATA_ATTR int photo_count = 0;
+
+const char* serverUrl = "http://192.168.1.24:8000/api/sendphoto";  // FastAPI running on port 8000
 
 DFRobot_LTR308 light;
 
@@ -230,7 +232,57 @@ bool sendPhotoToTelegram(camera_fb_t *fb) {
   return true;
 }
 
-void captureOneFrame() {
+void sendPhotoToServer(camera_fb_t *fb, int ambientLight) {
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("WiFi not connected - cannot send photo");
+        return;
+    }
+
+    WiFiClient client;
+    HTTPClient http;
+    http.begin(client, serverUrl);
+
+    String boundary = "----HawkerIDBoundary";
+    http.addHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
+
+    String bodyStart = "--" + boundary + "\r\n" +
+        "Content-Disposition: form-data; name=\"chat_id\"\r\n\r\n" +
+        String(TELEGRAM_CHAT_ID) + "\r\n" +
+        "--" + boundary + "\r\n" +
+        "Content-Disposition: form-data; name=\"ambient_light\"\r\n\r\n" +
+        String(ambientLight) + "\r\n" +
+        "--" + boundary + "\r\n" +
+        "Content-Disposition: form-data; name=\"file\"; filename=\"photo.jpg\"\r\n" +
+        "Content-Type: image/jpeg\r\n\r\n";
+
+    String bodyEnd = "\r\n--" + boundary + "--\r\n";
+
+    int contentLength = bodyStart.length() + fb->len + bodyEnd.length();
+    http.addHeader("Content-Length", String(contentLength));
+
+    int httpCode = http.sendRequest("POST", (uint8_t*)nullptr, 0);
+    if (httpCode <= 0) {
+        Serial.printf("Failed to send POST headers: %s\n", http.errorToString(httpCode).c_str());
+        http.end();
+        return;
+    }
+
+    // Send the multipart body start
+    http.getStream().print(bodyStart);
+
+    // Send the actual photo data
+    http.getStream().write(fb->buf, fb->len);
+
+    // Send multipart body end
+    http.getStream().print(bodyEnd);
+
+    String response = http.getString();
+    Serial.printf("Server Response Code: %d\nResponse: %s\n", httpCode, response.c_str());
+
+    http.end();
+}
+
+void captureOneFrame(float lux) {
 
   if (!cameraReady) {
     Serial.println("Camera not ready, cannot capture.");
@@ -244,11 +296,14 @@ void captureOneFrame() {
   }
 
   struct tm timeinfo;
+
   if (!getLocalTime(&timeinfo)) {
     Serial.println("Failed to get time for filename.");
     esp_camera_fb_return(fb);
     return;
   }
+
+  sendPhotoToServer(fb, lux);
 
   // Filename format: YYYYMMDD-HHMMSS-N.jpg
   char timeStr[32];
@@ -274,6 +329,7 @@ void captureOneFrame() {
   }
   
   esp_camera_fb_return(fb);
+
 }
 
 bool initSDCard() {
@@ -373,7 +429,10 @@ void loop() {
   
   static unsigned long lastLightCheck = 0;
   unsigned long now = millis();
-  
+
+  uint32_t raw = light.getData();
+  float lux = light.getLux(raw);
+
   if (now - lastLightCheck > 500) {  // check every 500 ms
     
     lastLightCheck = now;
@@ -449,7 +508,7 @@ void loop() {
     Serial.print(" Loud sound detected, RMS=");
     Serial.println(rms);
 
-    captureOneFrame();
+    captureOneFrame(lux);
   }
 
 }
