@@ -1,6 +1,6 @@
 # Hawker-ID
 
-This repository contains code for the Hawker-ID project, an intelligent ESP32-S3 AI camera system integrated with a Telegram bot for remote notifications and control.
+This repository contains code for the Hawker-ID project, an intelligent ESP32-S3 AI camera system integrated with a Telegram bot for remote notifications and control. Telegram bot will deploy on Arduino UNO Q.
 
 ---
 
