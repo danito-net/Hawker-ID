@@ -1,0 +1,4 @@
+Timestamp (UTC): 2025-11-30T19:27:06.382596
+Chat ID: 115580142
+Ambient light: 42
+Original Filename: photo.jpg

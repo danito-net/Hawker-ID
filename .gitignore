@@ -13,6 +13,7 @@
 
 # Environment / configuration file
 bot/.env
+api/.env
 
 # Local WiFi credentials (do not commit)
 HawkerID/include/secrets.h
